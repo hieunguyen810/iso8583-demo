@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: iso8583-server
+  labels:
+    app: iso8583-server
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: iso8583-server
+  template:
+    metadata:
+      labels:
+        app: iso8583-server
+    spec:
+      containers:
+        - name: iso8583-server
+          image: iso-8583-server:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8583
+          env:
+            - name: JAVA_OPTS
+              value: "-Xms256m -Xmx512m"
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          readinessProbe:
+            tcpSocket:
+              port: 8583
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8583
+            initialDelaySeconds: 10
+            periodSeconds: 20

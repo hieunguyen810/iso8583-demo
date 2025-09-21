@@ -4,6 +4,7 @@ import com.example.demo.model.Iso8583Message;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Value;
 
 import java.io.*;
 import java.net.Socket;
@@ -29,6 +30,8 @@ public class Iso8583Client implements CommandLineRunner {
     private final ScheduledExecutorService echoScheduler = Executors.newSingleThreadScheduledExecutor();
     private volatile boolean connected = false;
     private volatile Thread listenerThread;
+    @Value("${iso8583.client.server-host}")
+    private String ServerHost;
 
     @Override
     public void run(String... args) throws Exception {
@@ -118,9 +121,8 @@ public class Iso8583Client implements CommandLineRunner {
                 System.out.println("ℹ️ Already connected!");
                 return;
             }
-
             System.out.println("🔄 Connecting to server...");
-            socket = new Socket("localhost", PORT);
+            socket = new Socket(ServerHost, PORT);
             output = new DataOutputStream(socket.getOutputStream());
             input = new DataInputStream(socket.getInputStream());
             connected = true;
