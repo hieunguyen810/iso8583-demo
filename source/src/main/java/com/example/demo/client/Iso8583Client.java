@@ -1,6 +1,8 @@
 package com.example.demo.client;
 
 import com.example.demo.model.Iso8583Message;
+import com.example.demo.parser.Iso8583Parser;
+
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
@@ -228,7 +230,7 @@ public class Iso8583Client implements CommandLineRunner {
     private void processIncomingMessage(String message) {
         System.out.println("\n📨 Received Message: " + message);
 
-        Iso8583Message msg = parseMessage(message);
+        Iso8583Message msg = Iso8583Parser.parseMessage(message);
         String mti = msg.getMti();
 
         switch (mti) {

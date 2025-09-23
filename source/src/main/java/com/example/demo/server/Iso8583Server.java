@@ -1,193 +1,171 @@
 package com.example.demo.server;
 
 import com.example.demo.model.Iso8583Message;
+import com.example.demo.parser.Iso8583Parser;
+import com.example.demo.service.Iso8583Processor;
+import com.example.demo.simulator.Iso8583TransactionSimulator;
+
+import io.netty.bootstrap.ServerBootstrap;
+import io.netty.channel.*;
+import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.SocketChannel;
+import io.netty.channel.socket.nio.NioServerSocketChannel;
+import io.netty.handler.codec.LengthFieldBasedFrameDecoder;
+import io.netty.handler.codec.LengthFieldPrepender;
+import io.netty.handler.codec.string.StringDecoder;
+import io.netty.handler.codec.string.StringEncoder;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
-import org.springframework.stereotype.Component;
 import org.springframework.core.annotation.Order;
+import org.springframework.stereotype.Component;
 
-import java.io.*;
-import java.net.ServerSocket;
-import java.net.Socket;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.Future;
-import java.util.concurrent.locks.ReentrantLock;
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Component
 @Order(1)
 public class Iso8583Server {
     private static final int PORT = 8583;
-    private final ExecutorService clientHandlerPool = Executors.newFixedThreadPool(10);
-    private final ScheduledExecutorService scheduledTaskExecutor = Executors.newSingleThreadScheduledExecutor();
+    private final AtomicBoolean running = new AtomicBoolean(false);
+
+    private EventLoopGroup bossGroup;
+    private EventLoopGroup workerGroup;
 
     @EventListener(ApplicationReadyEvent.class)
     public void startServer() {
         String mode = System.getProperty("app.mode", "both");
         if (!"client".equals(mode)) {
-            new Thread(this::runServer).start();
-            System.out.println("🚀 ISO 8583 Server starting on port " + PORT);
+            new Thread(this::runServer, "netty-iso8583-server-thread").start();
+            System.out.println("🚀 Netty ISO 8583 Server starting on port " + PORT);
         }
     }
 
     private void runServer() {
-        try (ServerSocket serverSocket = new ServerSocket(PORT)) {
+        if (!running.compareAndSet(false, true)) {
+            return;
+        }
+
+        bossGroup = new NioEventLoopGroup(1);
+        workerGroup = new NioEventLoopGroup();
+
+        try {
+            ServerBootstrap b = new ServerBootstrap();
+            b.group(bossGroup, workerGroup)
+             .channel(NioServerSocketChannel.class)
+             .childHandler(new ChannelInitializer<SocketChannel>() {
+                 @Override
+                 protected void initChannel(SocketChannel ch) {
+                     ChannelPipeline p = ch.pipeline();
+
+                     // Inbound: read 2-byte length prefix and produce a frame (strip the length field)
+                     p.addLast(new LengthFieldBasedFrameDecoder(65535, 0, 2, 0, 2));
+                     // Convert ByteBuf frames to String (UTF-8)
+                     p.addLast(new StringDecoder(StandardCharsets.UTF_8));
+
+                     // Outbound: add 2-byte length prefix then encode String -> ByteBuf
+                     p.addLast(new LengthFieldPrepender(2));
+                     p.addLast(new StringEncoder(StandardCharsets.UTF_8));
+
+                     // Our handler that processes ISO messages
+                     p.addLast(new Iso8583ServerHandler());
+                 }
+             })
+             .option(ChannelOption.SO_BACKLOG, 128)
+             .childOption(ChannelOption.SO_KEEPALIVE, true);
+
+            ChannelFuture f = b.bind(PORT).sync();
             System.out.println("✅ Server ready and listening...");
             System.out.println("📋 Supported message types: 0200 (Auth), 0800 (Echo)");
-
-            while (true) {
-                Socket clientSocket = serverSocket.accept();
-                clientHandlerPool.submit(() -> handleClient(clientSocket));
-            }
-        } catch (IOException e) {
+            f.channel().closeFuture().sync();
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            System.err.println("❌ Server interrupted: " + ie.getMessage());
+        } catch (Exception e) {
             System.err.println("❌ Server error: " + e.getMessage());
+        } finally {
+            shutdown();
         }
     }
 
-    private void handleClient(Socket clientSocket) {
-        String clientAddress = clientSocket.getRemoteSocketAddress().toString();
-        System.out.println("🔌 Client connected: " + clientAddress);
+    private void shutdown() {
+        if (!running.compareAndSet(true, false)) return;
+        try {
+            if (bossGroup != null) bossGroup.shutdownGracefully().sync();
+            if (workerGroup != null) workerGroup.shutdownGracefully().sync();
+            System.out.println("🛑 Netty server shut down gracefully");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            System.err.println("❌ Shutdown interrupted: " + e.getMessage());
+        }
+    }
 
-        Future<?> periodicTask = null;
+    private static class Iso8583ServerHandler extends SimpleChannelInboundHandler<String> {
+        // Scheduled future for periodic sending per connection
+        private ScheduledFuture<?> periodicTask;
+        private ChannelHandlerContext ctx;
+        private String clientAddress;
 
-        try (DataInputStream input = new DataInputStream(clientSocket.getInputStream());
-             DataOutputStream output = new DataOutputStream(clientSocket.getOutputStream())) {
+        @Override
+        public void channelActive(ChannelHandlerContext ctx) {
+            this.ctx = ctx;
+            clientAddress = ctx.channel().remoteAddress().toString();
+            System.out.println("🔌 Client connected: " + clientAddress);
 
-            // Schedule a periodic task to send a message every 10 seconds
-            periodicTask = scheduledTaskExecutor.scheduleAtFixedRate(() -> {
-                // Synchronize on the output stream to prevent concurrent writes
-                synchronized (output) {
+            // Schedule periodic task every 10 seconds (first run after 10s)
+            periodicTask = ctx.executor().scheduleAtFixedRate(() -> {
+                if (ctx.channel().isActive()) {
                     try {
-                        Iso8583Message transaction = getTransaction();
+                        Iso8583Message transaction = Iso8583TransactionSimulator.getTransaction();
                         String transactionMessage = transaction.toString();
                         System.out.println("📤 [" + clientAddress + "] Periodically sending: " + transactionMessage);
-                        output.writeShort(transactionMessage.length());
-                        output.writeBytes(transactionMessage);
-                        output.flush();
-                    } catch (IOException e) {
+                        // Write with pipeline: StringEncoder -> LengthFieldPrepender will add length prefix
+                        ctx.writeAndFlush(transactionMessage).addListener(f -> {
+                            if (!f.isSuccess()) {
+                                System.err.println("❌ [" + clientAddress + "] Periodic send error: " + f.cause().getMessage());
+                            }
+                        });
+                    } catch (Exception e) {
                         System.err.println("❌ [" + clientAddress + "] Periodic send error: " + e.getMessage());
-                        // If an error occurs, the task will stop itself or the main loop will handle the socket closure.
                     }
                 }
-            }, 10, 10, TimeUnit.SECONDS);
+            }, 10, 10, java.util.concurrent.TimeUnit.SECONDS);
+        }
 
-            // Handle incoming messages on the same connection
-            while (!clientSocket.isClosed() && clientSocket.isConnected()) {
-                try {
-                    int messageLength = input.readUnsignedShort();
-                    byte[] messageBytes = new byte[messageLength];
-                    input.readFully(messageBytes);
-                    String isoMessage = new String(messageBytes);
-                    System.out.println("📨 [" + clientAddress + "] Received: " + isoMessage);
-
-                    Iso8583Message request = parseMessage(isoMessage);
-                    Iso8583Message response = processMessage(request);
-                    String responseMessage = response.toString();
-                    
-                    // Synchronize on the output stream before writing
-                    synchronized (output) {
-                        output.writeShort(responseMessage.length());
-                        output.writeBytes(responseMessage);
-                        output.flush();
-                    }
-                    
-                    System.out.println("📤 [" + clientAddress + "] Sent: " + responseMessage);
-                } catch (EOFException e) {
-                    System.out.println("👋 [" + clientAddress + "] Client disconnected");
-                    break;
-                } catch (IOException e) {
-                    System.err.println("🔌 [" + clientAddress + "] Connection error: " + e.getMessage());
-                    break;
-                }
-            }
-        } catch (Exception e) {
-            System.err.println("❌ [" + clientAddress + "] Error handling client: " + e.getMessage());
-        } finally {
-            if (periodicTask != null) {
-                periodicTask.cancel(true); // Stop the periodic task
-            }
+        @Override
+        protected void channelRead0(ChannelHandlerContext ctx, String msg) {
+            // msg is one framed String message (length already stripped)
+            System.out.println("📨 [" + clientAddress + "] Received: " + msg);
             try {
-                if (!clientSocket.isClosed()) {
-                    clientSocket.close();
-                }
-                System.out.println("🔌 [" + clientAddress + "] Connection closed");
-            } catch (IOException e) {
-                System.err.println("❌ Error closing client socket: " + e.getMessage());
-            }
-        }
-    }
-
-    // --- All other methods (parseMessage, getTransaction, processMessage, etc.) remain the same ---
-    private Iso8583Message parseMessage(String message) {
-        Iso8583Message msg = new Iso8583Message();
-        if (message.length() >= 4) {
-            String mti = message.substring(0, 4);
-            msg.setMti(mti);
-            String[] parts = message.split("\\|");
-            for (int i = 1; i < parts.length; i++) {
-                String[] fieldValue = parts[i].split("=", 2);
-                if (fieldValue.length == 2) {
-                    try {
-                        int fieldNumber = Integer.parseInt(fieldValue[0]);
-                        msg.addField(fieldNumber, fieldValue[1]);
-                    } catch (NumberFormatException e) {
-                        System.err.println("⚠️ Invalid field number: " + fieldValue[0]);
+                Iso8583Message request = Iso8583Parser.parseMessage(msg);
+                Iso8583Message response = Iso8583Processor.processMessage(request);
+                String responseMessage = response.toString();
+                // writeAndFlush will go through StringEncoder and LengthFieldPrepender
+                ctx.writeAndFlush(responseMessage).addListener(f -> {
+                    if (f.isSuccess()) {
+                        System.out.println("📤 [" + clientAddress + "] Sent: " + responseMessage);
+                    } else {
+                        System.err.println("❌ [" + clientAddress + "] Send failed: " + f.cause().getMessage());
                     }
-                }
+                });
+            } catch (Exception e) {
+                System.err.println("❌ [" + clientAddress + "] Error processing message: " + e.getMessage());
             }
         }
-        return msg;
-    }
 
-    private Iso8583Message getTransaction() {
-        Iso8583Message transaction = new Iso8583Message();
-        transaction.setMti("0200");
-        transaction.addField(2, "0000000000000000");
-        return transaction;
-    }
-
-    private Iso8583Message processMessage(Iso8583Message request) {
-        Iso8583Message response = new Iso8583Message();
-        String requestMti = request.getMti();
-
-        if ("0200".equals(requestMti)) {
-            response.setMti("0210");
-            copyField(request, response, 2);
-            copyField(request, response, 3);
-            copyField(request, response, 4);
-            copyField(request, response, 7);
-            copyField(request, response, 11);
-            copyField(request, response, 37);
-            response.addField(38, generateApprovalCode());
-            response.addField(39, "00");
-            System.out.println("💳 Processed authorization request - APPROVED");
-        } else if ("0800".equals(requestMti)) {
-            response.setMti("0810");
-            copyField(request, response, 7);
-            copyField(request, response, 11);
-            copyField(request, response, 70);
-            response.addField(7, LocalDateTime.now().format(DateTimeFormatter.ofPattern("MMddHHmmss")));
-            System.out.println("💓 Processed echo request - Connection alive");
-        } else {
-            response.setMti("0210");
-            response.addField(39, "30");
-            System.err.println("⚠️ Unknown message type: " + requestMti);
+        @Override
+        public void channelInactive(ChannelHandlerContext ctx) {
+            System.out.println("👋 [" + clientAddress + "] Client disconnected");
+            if (periodicTask != null && !periodicTask.isCancelled()) {
+                periodicTask.cancel(true);
+            }
         }
-        return response;
-    }
 
-    private void copyField(Iso8583Message source, Iso8583Message target, int fieldNumber) {
-        String value = source.getField(fieldNumber);
-        if (value != null) {
-            target.addField(fieldNumber, value);
+        @Override
+        public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
+            System.err.println("🔌 [" + clientAddress + "] Connection error: " + cause.getMessage());
+            ctx.close();
         }
-    }
 
-    private String generateApprovalCode() {
-        return String.format("%06d", (int) (Math.random() * 999999));
     }
 }
