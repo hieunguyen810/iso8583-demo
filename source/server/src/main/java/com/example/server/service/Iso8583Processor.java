@@ -27,7 +27,9 @@ public class Iso8583Processor {
             copyField(request, response, 70);
             response.addField(7, LocalDateTime.now().format(DateTimeFormatter.ofPattern("MMddHHmmss")));
             System.out.println("💓 Processed echo request - Connection alive");
-        } else {
+        } else if ("0210".equals(requestMti))
+            System.out.println("Authorize Successfully");
+        else {
             response.setMti("0210");
             response.addField(39, "30");
             System.err.println("⚠️ Unknown message type: " + requestMti);

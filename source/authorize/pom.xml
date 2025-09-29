@@ -7,27 +7,11 @@
 		<artifactId>iso-8583-demo</artifactId>
 		<version>0.0.1-SNAPSHOT</version>
 	</parent>
-	<artifactId>client</artifactId>
-	<version>0.0.1-SNAPSHOT</version>
-	<name>client</name>
+	<artifactId>authorize</artifactId>
+	<name>authorize</name>
 	<packaging>jar</packaging>
-	<description>Demo ISO 8583 client</description>
-	<url/>
-	<licenses>
-		<license/>
-	</licenses>
-	<developers>
-		<developer/>
-	</developers>
-	<scm>
-		<connection/>
-		<developerConnection/>
-		<tag/>
-		<url/>
-	</scm>
-	<properties>
-		<java.version>17</java.version>
-	</properties>
+	<description>ISO 8583 Authorization Service</description>
+
 	<dependencies>
 		<dependency>
 			<groupId>com.example</groupId>
@@ -40,17 +24,6 @@
 		</dependency>
 
 		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-test</artifactId>
-			<scope>test</scope>
-		</dependency>
-
-		<dependency>
-			<groupId>io.netty</groupId>
-			<artifactId>netty-all</artifactId>
-			<version>4.2.6.Final</version>
-		</dependency>
-		<dependency>
 			<groupId>org.springframework.kafka</groupId>
 			<artifactId>spring-kafka</artifactId>
 		</dependency>
@@ -61,11 +34,11 @@
 		</dependency>
 
 		<dependency>
-			<groupId>com.fasterxml.jackson.datatype</groupId>
-			<artifactId>jackson-datatype-jsr310</artifactId>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-test</artifactId>
+			<scope>test</scope>
 		</dependency>
 	</dependencies>
-
 
 	<build>
 		<plugins>
@@ -75,5 +48,4 @@
 			</plugin>
 		</plugins>
 	</build>
-
 </project>

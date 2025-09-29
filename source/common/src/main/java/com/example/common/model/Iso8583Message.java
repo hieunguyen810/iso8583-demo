@@ -23,6 +23,10 @@ public class Iso8583Message {
         return fields.get(fieldNumber);
     }
     
+    public Map<Integer, String> getFields() {
+        return fields;
+    }
+    
     @Override
     public String toString() {
         StringBuilder sb = new StringBuilder();

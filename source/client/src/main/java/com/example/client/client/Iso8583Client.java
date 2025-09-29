@@ -1,17 +1,23 @@
 package com.example.client.client;
 
-import com.example.common.model.Iso8583Message; 
-import com.example.common.parser.Iso8583Parser;
+import com.example.common.model.Iso8583Message;
 import com.example.client.processor.Iso8583Processor;
+
+import io.netty.bootstrap.Bootstrap;
+import io.netty.buffer.ByteBuf;
+import io.netty.channel.*;
+import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.SocketChannel;
+import io.netty.channel.socket.nio.NioSocketChannel;
+import io.netty.handler.codec.LengthFieldBasedFrameDecoder;
+import io.netty.handler.codec.LengthFieldPrepender;
 
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.beans.factory.annotation.Value;
 
-import java.io.*;
-import java.net.Socket;
-import java.net.SocketException;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Random;
@@ -26,15 +32,14 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class Iso8583Client implements CommandLineRunner {
 
     private static final int PORT = 8583;
-    private Socket socket;
-    private DataOutputStream output;
-    private DataInputStream input;
+    private Channel channel;
+    private EventLoopGroup workerGroup;
     private final AtomicInteger stanCounter = new AtomicInteger(1);
     private final ScheduledExecutorService echoScheduler = Executors.newSingleThreadScheduledExecutor();
     private volatile boolean connected = false;
-    private volatile Thread listenerThread;
+    
     @Value("${iso8583.client.server-host}")
-    private String ServerHost;
+    private String serverHost;
 
     @Override
     public void run(String... args) throws Exception {
@@ -53,7 +58,7 @@ public class Iso8583Client implements CommandLineRunner {
     }
 
     private void runPersistentClient() {
-        System.out.println("\n🔄 Persistent ISO 8583 Client");
+        System.out.println("\n🔄 Persistent ISO 8583 Client (Netty)");
         System.out.println("Commands:");
         System.out.println("  'connect'    - Connect to server");
         System.out.println("  'disconnect' - Disconnect from server");
@@ -124,25 +129,45 @@ public class Iso8583Client implements CommandLineRunner {
                 System.out.println("ℹ️ Already connected!");
                 return;
             }
+            
             System.out.println("🔄 Connecting to server...");
-            socket = new Socket(ServerHost, PORT);
-            output = new DataOutputStream(socket.getOutputStream());
-            input = new DataInputStream(socket.getInputStream());
+            
+            workerGroup = new NioEventLoopGroup();
+            
+            Bootstrap bootstrap = new Bootstrap();
+            bootstrap.group(workerGroup)
+                    .channel(NioSocketChannel.class)
+                    .option(ChannelOption.SO_KEEPALIVE, true)
+                    .option(ChannelOption.TCP_NODELAY, true)
+                    .handler(new ChannelInitializer<SocketChannel>() {
+                        @Override
+                        protected void initChannel(SocketChannel ch) {
+                            ChannelPipeline pipeline = ch.pipeline();
+                            
+                            // Length field handling (2 bytes for message length)
+                            pipeline.addLast(new LengthFieldBasedFrameDecoder(65535, 0, 2, 0, 2));
+                            pipeline.addLast(new LengthFieldPrepender(2));
+                            
+                            // Message handler
+                            pipeline.addLast(new Iso8583ClientHandler());
+                        }
+                    });
+
+            ChannelFuture future = bootstrap.connect(serverHost, PORT).sync();
+            channel = future.channel();
             connected = true;
-
+            
             System.out.println("✅ Connected successfully!");
-
-            // Start the dedicated listener thread
-            listenerThread = new Thread(this::listenForMessages);
-            listenerThread.setDaemon(true);
-            listenerThread.start();
-
+            
             // Send initial echo to verify connection
             sendEchoMessage();
 
         } catch (Exception e) {
             System.err.println("❌ Connection failed: " + e.getMessage());
             connected = false;
+            if (workerGroup != null) {
+                workerGroup.shutdownGracefully();
+            }
         }
     }
 
@@ -155,12 +180,12 @@ public class Iso8583Client implements CommandLineRunner {
 
             System.out.println("🔄 Disconnecting...");
 
-            if (listenerThread != null) {
-                listenerThread.interrupt();
+            if (channel != null && channel.isActive()) {
+                channel.close().sync();
             }
 
-            if (socket != null && !socket.isClosed()) {
-                socket.close();
+            if (workerGroup != null) {
+                workerGroup.shutdownGracefully().sync();
             }
 
             connected = false;
@@ -174,58 +199,45 @@ public class Iso8583Client implements CommandLineRunner {
     }
 
     private boolean ensureConnected() {
-        if (!connected) {
+        if (!connected || channel == null || !channel.isActive()) {
             System.out.println("❌ Not connected! Use 'connect' command first.");
             return false;
         }
         return true;
     }
 
-    // New listener method to handle all incoming messages
-    private void listenForMessages() {
-        try {
-            while (!Thread.currentThread().isInterrupted() && connected) {
-                int messageLength = input.readUnsignedShort();
-                byte[] messageBytes = new byte[messageLength];
-                input.readFully(messageBytes);
-                String isoMessage = new String(messageBytes);
-
-                Iso8583Processor.processIncomingMessage(isoMessage, connected);
-            }
-        } catch (EOFException e) {
-            System.out.println("\n👋 Server disconnected gracefully.");
-        } catch (SocketException e) {
-            if (e.getMessage().contains("Socket closed")) {
-                System.out.println("\n👋 Disconnected.");
-            } else {
-                System.err.println("\n🔌 Connection error in listener: " + e.getMessage());
-            }
-        } catch (IOException e) {
-            System.err.println("\n🔌 IO error in listener: " + e.getMessage());
-        } finally {
-            connected = false;
-            System.out.print("\nClient [DISCONNECTED]> ");
-        }
-    }
-
-    private synchronized void sendAuthorizationRequest() throws Exception {
+    private void sendAuthorizationRequest() throws Exception {
         Iso8583Message request = createAuthorizationRequest();
         String requestMessage = request.toString();
         System.out.println("📤 Sending Authorization: " + requestMessage);
-        output.writeShort(requestMessage.length());
-        output.writeBytes(requestMessage);
-        output.flush();
-        System.out.println("... Waiting for response...");
+        
+        ByteBuf buf = channel.alloc().buffer();
+        buf.writeBytes(requestMessage.getBytes(StandardCharsets.UTF_8));
+        
+        channel.writeAndFlush(buf).addListener((ChannelFutureListener) future -> {
+            if (future.isSuccess()) {
+                System.out.println("... Waiting for response...");
+            } else {
+                System.err.println("❌ Failed to send message: " + future.cause().getMessage());
+            }
+        });
     }
 
-    private synchronized void sendEchoMessage() throws Exception {
+    private void sendEchoMessage() throws Exception {
         Iso8583Message echoRequest = createEchoMessage();
         String requestMessage = echoRequest.toString();
         System.out.println("💓 Sending Echo: " + requestMessage);
-        output.writeShort(requestMessage.length());
-        output.writeBytes(requestMessage);
-        output.flush();
-        System.out.println("... Waiting for echo response...");
+        
+        ByteBuf buf = channel.alloc().buffer();
+        buf.writeBytes(requestMessage.getBytes(StandardCharsets.UTF_8));
+        
+        channel.writeAndFlush(buf).addListener((ChannelFutureListener) future -> {
+            if (future.isSuccess()) {
+                System.out.println("... Waiting for echo response...");
+            } else {
+                System.err.println("❌ Failed to send echo: " + future.cause().getMessage());
+            }
+        });
     }
 
     private Iso8583Message createAuthorizationRequest() {
@@ -258,40 +270,19 @@ public class Iso8583Client implements CommandLineRunner {
         return msg;
     }
 
-    private Iso8583Message parseMessage(String message) {
-        Iso8583Message msg = new Iso8583Message();
-        if (message.length() >= 4) {
-            String mti = message.substring(0, 4);
-            msg.setMti(mti);
-            String[] parts = message.split("\\|");
-            for (int i = 1; i < parts.length; i++) {
-                String[] fieldValue = parts[i].split("=", 2);
-                if (fieldValue.length == 2) {
-                    try {
-                        int fieldNumber = Integer.parseInt(fieldValue[0]);
-                        msg.addField(fieldNumber, fieldValue[1]);
-                    } catch (NumberFormatException e) {
-                        System.err.println("⚠️ Invalid field number: " + fieldValue[0]);
-                    }
-                }
-            }
-        }
-        return msg;
-    }
-
     private String generatePan() {
         Random random = new Random();
         return "4000" + String.format("%012d", random.nextInt(1000000000));
     }
 
-
     private void showConnectionStatus() {
         System.out.println("\n📊 Connection Status:");
         System.out.println("   Connected: " + (connected ? "✅ Yes" : "❌ No"));
-        if (connected && socket != null) {
-            System.out.println("   Server: " + socket.getRemoteSocketAddress());
-            System.out.println("   Local: " + socket.getLocalSocketAddress());
-            System.out.println("   Socket Open: " + !socket.isClosed());
+        if (connected && channel != null) {
+            System.out.println("   Server: " + channel.remoteAddress());
+            System.out.println("   Local: " + channel.localAddress());
+            System.out.println("   Channel Active: " + channel.isActive());
+            System.out.println("   Channel Writable: " + channel.isWritable());
         }
         System.out.println("   STAN Counter: " + stanCounter.get());
     }
@@ -338,6 +329,35 @@ public class Iso8583Client implements CommandLineRunner {
             System.out.println("\n✅ All tests completed using persistent connection!");
         } finally {
             disconnect();
+        }
+    }
+
+    // Netty Channel Handler for incoming messages
+    private class Iso8583ClientHandler extends ChannelInboundHandlerAdapter {
+        
+        @Override
+        public void channelRead(ChannelHandlerContext ctx, Object msg) {
+            ByteBuf buf = (ByteBuf) msg;
+            try {
+                String isoMessage = buf.toString(StandardCharsets.UTF_8);
+                Iso8583Processor.processIncomingMessage(isoMessage, connected);
+            } finally {
+                buf.release();
+            }
+        }
+
+        @Override
+        public void channelInactive(ChannelHandlerContext ctx) {
+            System.out.println("\n👋 Server disconnected.");
+            connected = false;
+            System.out.print("\nClient [DISCONNECTED]> ");
+        }
+
+        @Override
+        public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
+            System.err.println("\n🔌 Connection error: " + cause.getMessage());
+            connected = false;
+            ctx.close();
         }
     }
 }
