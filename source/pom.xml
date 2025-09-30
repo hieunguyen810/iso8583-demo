@@ -18,9 +18,9 @@
         <module>client</module>
         <module>authorize</module>
         <module>server</module>
+        <module>simulator</module>
         <!-- <module>router</module> -->
         <!-- <module>services</module> -->
-        <!-- <module>simulator</module> -->
     </modules>
 
     <properties>

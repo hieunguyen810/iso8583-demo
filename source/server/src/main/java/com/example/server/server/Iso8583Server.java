@@ -3,7 +3,7 @@ package com.example.server.server;
 import com.example.common.model.Iso8583Message;
 import com.example.common.parser.Iso8583Parser;
 import com.example.server.service.Iso8583Processor;
-import com.example.server.simulator.Iso8583TransactionSimulator;
+
 
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.*;
@@ -28,9 +28,24 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class Iso8583Server {
     private static final int PORT = 8583;
     private final AtomicBoolean running = new AtomicBoolean(false);
+    private static final java.util.concurrent.ConcurrentHashMap<String, ChannelHandlerContext> connectedClients = new java.util.concurrent.ConcurrentHashMap<>();
 
     private EventLoopGroup bossGroup;
     private EventLoopGroup workerGroup;
+    
+    public static void broadcastToClients(String message) {
+        connectedClients.values().forEach(ctx -> {
+            if (ctx.channel().isActive()) {
+                String clientAddress = ctx.channel().remoteAddress().toString();
+                System.out.println("📤 [" + clientAddress + "] Broadcasting: " + message);
+                ctx.writeAndFlush(message).addListener(f -> {
+                    if (!f.isSuccess()) {
+                        System.err.println("❌ [" + clientAddress + "] Broadcast error: " + f.cause().getMessage());
+                    }
+                });
+            }
+        });
+    }
 
     @EventListener(ApplicationReadyEvent.class)
     public void startServer() {
@@ -101,8 +116,6 @@ public class Iso8583Server {
     }
 
     private static class Iso8583ServerHandler extends SimpleChannelInboundHandler<String> {
-        // Scheduled future for periodic sending per connection
-        private ScheduledFuture<?> periodicTask;
         private ChannelHandlerContext ctx;
         private String clientAddress;
 
@@ -111,25 +124,9 @@ public class Iso8583Server {
             this.ctx = ctx;
             clientAddress = ctx.channel().remoteAddress().toString();
             System.out.println("🔌 Client connected: " + clientAddress);
-
-            // Schedule periodic task every 10 seconds (first run after 10s)
-            periodicTask = ctx.executor().scheduleAtFixedRate(() -> {
-                if (ctx.channel().isActive()) {
-                    try {
-                        Iso8583Message transaction = Iso8583TransactionSimulator.getTransaction();
-                        String transactionMessage = transaction.toString();
-                        System.out.println("📤 [" + clientAddress + "] Periodically sending: " + transactionMessage);
-                        // Write with pipeline: StringEncoder -> LengthFieldPrepender will add length prefix
-                        ctx.writeAndFlush(transactionMessage).addListener(f -> {
-                            if (!f.isSuccess()) {
-                                System.err.println("❌ [" + clientAddress + "] Periodic send error: " + f.cause().getMessage());
-                            }
-                        });
-                    } catch (Exception e) {
-                        System.err.println("❌ [" + clientAddress + "] Periodic send error: " + e.getMessage());
-                    }
-                }
-            }, 10, 10, java.util.concurrent.TimeUnit.SECONDS);
+            
+            // Add client to connected clients map
+            connectedClients.put(clientAddress, ctx);
         }
 
         @Override
@@ -156,9 +153,8 @@ public class Iso8583Server {
         @Override
         public void channelInactive(ChannelHandlerContext ctx) {
             System.out.println("👋 [" + clientAddress + "] Client disconnected");
-            if (periodicTask != null && !periodicTask.isCancelled()) {
-                periodicTask.cancel(true);
-            }
+            // Remove client from connected clients map
+            connectedClients.remove(clientAddress);
         }
 
         @Override
