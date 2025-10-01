@@ -1,0 +1,247 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: #1e1e1e;
+    color: #d4d4d4;
+    padding: 20px;
+}
+
+.container {
+    max-width: 1400px;
+    margin: 0 auto;
+}
+
+h1 {
+    color: #4fc3f7;
+    margin-bottom: 30px;
+    font-size: 28px;
+}
+
+.panel {
+    background: #252526;
+    border: 1px solid #3e3e42;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.panel-title {
+    color: #4fc3f7;
+    font-size: 18px;
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #3e3e42;
+}
+
+.form-group {
+    margin-bottom: 15px;
+}
+
+label {
+    display: block;
+    margin-bottom: 5px;
+    color: #9cdcfe;
+    font-size: 14px;
+}
+
+input, textarea, select {
+    width: 100%;
+    padding: 10px;
+    background: #1e1e1e;
+    border: 1px solid #3e3e42;
+    border-radius: 4px;
+    color: #d4d4d4;
+    font-size: 14px;
+    font-family: 'Consolas', 'Courier New', monospace;
+}
+
+input:focus, textarea:focus, select:focus {
+    outline: none;
+    border-color: #4fc3f7;
+}
+
+textarea {
+    min-height: 100px;
+    resize: vertical;
+}
+
+button {
+    background: #0e639c;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    margin-right: 10px;
+    transition: background 0.3s;
+}
+
+button:hover {
+    background: #1177bb;
+}
+
+button:disabled {
+    background: #3e3e42;
+    cursor: not-allowed;
+}
+
+button.danger {
+    background: #d32f2f;
+}
+
+button.danger:hover {
+    background: #f44336;
+}
+
+button.success {
+    background: #388e3c;
+}
+
+button.success:hover {
+    background: #4caf50;
+}
+
+.connections-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 15px;
+    margin-top: 15px;
+}
+
+.connection-card {
+    background: #2d2d30;
+    border: 1px solid #3e3e42;
+    border-radius: 6px;
+    padding: 15px;
+    transition: border-color 0.3s;
+}
+
+.connection-card:hover {
+    border-color: #4fc3f7;
+}
+
+.connection-card.active {
+    border-color: #4caf50;
+    box-shadow: 0 0 10px rgba(76, 175, 80, 0.3);
+}
+
+.connection-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.connection-id {
+    font-weight: bold;
+    color: #4fc3f7;
+    font-size: 16px;
+}
+
+.status-badge {
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.status-connected {
+    background: #4caf50;
+    color: white;
+}
+
+.status-disconnected {
+    background: #f44336;
+    color: white;
+}
+
+.connection-details {
+    font-size: 13px;
+    color: #888;
+    margin-bottom: 10px;
+}
+
+.connection-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.connection-actions button {
+    flex: 1;
+    min-width: 70px;
+    padding: 8px 12px;
+    font-size: 12px;
+    margin: 0;
+}
+
+.console-output {
+    background: #1e1e1e;
+    border: 1px solid #3e3e42;
+    border-radius: 4px;
+    padding: 15px;
+    max-height: 400px;
+    overflow-y: auto;
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 13px;
+}
+
+.console-line {
+    margin-bottom: 8px;
+    padding: 5px;
+    border-radius: 3px;
+}
+
+.console-line.info {
+    color: #4fc3f7;
+}
+
+.console-line.success {
+    color: #4caf50;
+}
+
+.console-line.error {
+    color: #f44336;
+}
+
+.console-line.request {
+    color: #ce9178;
+}
+
+.console-line.response {
+    color: #9cdcfe;
+}
+
+.timestamp {
+    color: #666;
+    font-size: 11px;
+    margin-right: 10px;
+}
+
+.two-column {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+}
+
+@media (max-width: 768px) {
+    .two-column {
+        grid-template-columns: 1fr;
+    }
+}
+
+.form-row {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 10px;
+}
+
+#apiUrl {
+    margin-bottom: 20px;
+}

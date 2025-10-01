@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package iso8583;
+
+option java_package = "com.example.simulator.grpc";
+option java_outer_classname = "Iso8583Proto";
+
+service Iso8583Service {
+  rpc SendTransaction(TransactionRequest) returns (TransactionResponse);
+}
+
+message TransactionRequest {
+  string message = 1;
+  string clientId = 2;
+}
+
+message TransactionResponse {
+  bool success = 1;
+  string message = 2;
+}
