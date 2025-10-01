@@ -2,6 +2,7 @@ package com.example.client.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 
@@ -10,6 +11,7 @@ import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 
 @Service
+@ConditionalOnProperty(name = "iso8583.client.authorization.enabled", havingValue = "true")
 public class ResponseConsumerService {
 
     private final ObjectMapper objectMapper = new ObjectMapper();

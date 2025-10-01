@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ISO 8583 Remote Console</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <h1>🔌 ISO 8583 Remote Console</h1>
+
+        <div class="panel">
+            <div class="form-group">
+                <label for="apiUrl">API Base URL</label>
+                <input type="text" id="apiUrl" value="http://localhost:8081/api/iso8583" placeholder="http://localhost:8081/api/iso8583">
+            </div>
+        </div>
+
+        <div class="two-column">
+            <div>
+                <div class="panel">
+                    <div class="panel-title">➕ Add New Connection</div>
+                    <div class="form-group">
+                        <label for="connectionId">Connection ID</label>
+                        <input type="text" id="connectionId" placeholder="server1">
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="host">Host</label>
+                            <input type="text" id="host" placeholder="192.168.1.100">
+                        </div>
+                        <div class="form-group">
+                            <label for="port">Port</label>
+                            <input type="number" id="port" placeholder="5000">
+                        </div>
+                    </div>
+                    <button onclick="addConnection()">Add Connection</button>
+                    <button onclick="refreshConnections()">Refresh List</button>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-title">📡 Active Connections</div>
+                    <div class="connections-grid" id="connectionsGrid">
+                        <div style="grid-column: 1/-1; text-align: center; color: #666; padding: 20px;">
+                            No connections yet. Add one above.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div>
+                <div class="panel">
+                    <div class="panel-title">📤 Send Message</div>
+                    <div class="form-group">
+                        <label for="targetConnection">Target Connection</label>
+                        <select id="targetConnection">
+                            <option value="">Select a connection</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="messageContent">Message Content</label>
+                        <textarea id="messageContent" placeholder="Enter ISO 8583 message..."></textarea>
+                    </div>
+                    <button class="success" onclick="sendMessage()">Send Message</button>
+                    <button onclick="sendEcho()">Send Echo</button>
+                    <button onclick="clearConsole()">Clear Console</button>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-title">📋 Console Output</div>
+                    <div class="console-output" id="consoleOutput">
+                        <div class="console-line info">Console ready. Waiting for actions...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
