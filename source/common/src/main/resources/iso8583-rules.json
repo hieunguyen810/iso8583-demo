@@ -1,0 +1,31 @@
+{
+  "fields": {
+    "2": { "name": "Primary Account Number", "type": "NUMERIC", "format": "LLVAR", "maxLength": 19 },
+    "3": { "name": "Processing Code", "type": "NUMERIC", "format": "FIXED", "length": 6 },
+    "4": { "name": "Amount Transaction", "type": "NUMERIC", "format": "FIXED", "length": 12 },
+    "7": { "name": "Transmission Date Time", "type": "NUMERIC", "format": "FIXED", "length": 10 },
+    "11": { "name": "System Trace Audit Number", "type": "NUMERIC", "format": "FIXED", "length": 6 },
+    "12": { "name": "Time Local Transaction", "type": "NUMERIC", "format": "FIXED", "length": 6 },
+    "13": { "name": "Date Local Transaction", "type": "NUMERIC", "format": "FIXED", "length": 4 },
+    "18": { "name": "Merchant Category Code", "type": "NUMERIC", "format": "FIXED", "length": 4 },
+    "22": { "name": "POS Entry Mode", "type": "NUMERIC", "format": "FIXED", "length": 3 },
+    "25": { "name": "POS Condition Code", "type": "NUMERIC", "format": "FIXED", "length": 2 },
+    "37": { "name": "Retrieval Reference Number", "type": "ALPHANUMERIC", "format": "FIXED", "length": 12 },
+    "38": { "name": "Authorization ID Response", "type": "ALPHANUMERIC", "format": "FIXED", "length": 6 },
+    "39": { "name": "Response Code", "type": "ALPHANUMERIC", "format": "FIXED", "length": 2 },
+    "41": { "name": "Card Acceptor Terminal ID", "type": "ALPHANUMERIC", "format": "FIXED", "length": 8 },
+    "42": { "name": "Card Acceptor ID Code", "type": "ALPHANUMERIC", "format": "FIXED", "length": 15 },
+    "49": { "name": "Currency Code Transaction", "type": "NUMERIC", "format": "FIXED", "length": 3 },
+    "70": { "name": "Network Management Info Code", "type": "NUMERIC", "format": "FIXED", "length": 3 }
+  },
+  "mtiRules": {
+    "0100": { "name": "Authorization Request", "requiredFields": [2, 3, 4, 7, 11, 12, 13, 18, 22, 25, 37, 41, 42, 49] },
+    "0110": { "name": "Authorization Response", "requiredFields": [3, 4, 7, 11, 12, 13, 37, 38, 39, 41, 42] },
+    "0200": { "name": "Financial Request", "requiredFields": [2, 3, 4, 7, 11, 12, 13, 18, 22, 25, 37, 41, 42, 49] },
+    "0210": { "name": "Financial Response", "requiredFields": [3, 4, 7, 11, 12, 13, 37, 38, 39, 41, 42] },
+    "0800": { "name": "Network Management Request", "requiredFields": [7, 11, 12, 13, 70] },
+    "0810": { "name": "Network Management Response", "requiredFields": [7, 11, 12, 13, 39, 70] },
+    "0900": { "name": "File Update Request", "requiredFields": [7, 11, 12, 13, 70] },
+    "0910": { "name": "File Update Response", "requiredFields": [7, 11, 12, 13, 39, 70] }
+  }
+}

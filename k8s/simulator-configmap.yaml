@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: simulator-config
+  namespace: default
+data:
+  GRPC_SERVER_HOST: "server-service"
+  GRPC_SERVER_PORT: "9090"

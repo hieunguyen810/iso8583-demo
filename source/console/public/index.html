@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ISO 8583 Remote Console</title>
+</head>
+<body>
+    <div id="root"></div>
+    <script src="/config.js"></script>
+    <script>
+        // Fallback configuration for local development
+        window.APP_CONFIG = window.APP_CONFIG || {
+            API_BASE_URL: 'http://localhost:8081/api/iso8583'
+        };
+    </script>
+</body>
+</html>
