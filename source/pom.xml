@@ -19,8 +19,6 @@
         <module>authorize</module>
         <module>server</module>
         <module>simulator</module>
-        <!-- <module>router</module> -->
-        <!-- <module>services</module> -->
     </modules>
 
     <properties>

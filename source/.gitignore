@@ -31,3 +31,14 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Console (React)
+console/node_modules/
+console/build/
+console/.env.local
+console/.env.development.local
+console/.env.test.local
+console/.env.production.local
+console/npm-debug.log*
+console/yarn-debug.log*
+console/yarn-error.log*

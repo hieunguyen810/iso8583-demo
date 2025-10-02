@@ -50,7 +50,7 @@ public class Iso8583Processor {
             System.out.println("\n📥 Received ISO 8583 Message: " + isoMessage);
             
             // Parse the ISO 8583 message
-            Iso8583Message parsedMessage = parseIso8583Message(isoMessage);
+            Iso8583Message parsedMessage = Iso8583Parser.parseMessage(isoMessage);
             
             if (parsedMessage == null) {
                 System.err.println("❌ Failed to parse ISO 8583 message");
@@ -72,43 +72,6 @@ public class Iso8583Processor {
         } catch (Exception e) {
             System.err.println("❌ Error processing incoming message: " + e.getMessage());
             e.printStackTrace();
-        }
-    }
-
-    /**
-     * Parse ISO 8583 message string into Iso8583Message object
-     */
-    private static Iso8583Message parseIso8583Message(String isoMessage) {
-        Iso8583Message message = new Iso8583Message();
-        
-        if (isoMessage == null || isoMessage.length() < 4) {
-            return null;
-        }
-
-        try {
-            // Extract MTI (first 4 characters)
-            String mti = isoMessage.substring(0, 4);
-            message.setMti(mti);
-            
-            // Parse fields (format: MTI|fieldNum=value|fieldNum=value|...)
-            String[] parts = isoMessage.split("\\|");
-            for (int i = 1; i < parts.length; i++) {
-                String[] fieldValue = parts[i].split("=", 2);
-                if (fieldValue.length == 2) {
-                    try {
-                        int fieldNumber = Integer.parseInt(fieldValue[0]);
-                        message.addField(fieldNumber, fieldValue[1]);
-                    } catch (NumberFormatException e) {
-                        System.err.println("⚠️ Invalid field number: " + fieldValue[0]);
-                    }
-                }
-            }
-            
-            return message;
-            
-        } catch (Exception e) {
-            System.err.println("❌ Error parsing message: " + e.getMessage());
-            return null;
         }
     }
 

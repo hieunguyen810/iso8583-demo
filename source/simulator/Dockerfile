@@ -6,8 +6,8 @@ USER spring:spring
 
 WORKDIR /app
 
-COPY /source/target/*.jar app.jar
+COPY /target/simulator*.jar app.jar
 
-EXPOSE 8583
+EXPOSE 8084
 
-ENTRYPOINT ["java","-jar","app.jar", "server"]
+ENTRYPOINT ["java","-jar","app.jar"]

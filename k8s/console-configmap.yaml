@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: console-config
+  namespace: default
+data:
+  API_BASE_URL: "http://client-service:8081/api/iso8583"
