@@ -5,3 +5,5 @@ metadata:
   namespace: default
 data:
   API_BASE_URL: "http://client-service:8081/api/iso8583"
+  FARO_URL: 
+  ENVIRONMENT: "production"

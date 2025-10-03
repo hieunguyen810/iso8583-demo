@@ -1,11 +1,23 @@
 package com.example.server.service;
 
 import com.example.common.model.Iso8583Message;
+import com.example.common.model.ValidationResult;
+import com.example.common.parser.Iso8583Parser;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 
 public class Iso8583Processor {
     public static Iso8583Message processMessage(Iso8583Message request) {
+        // Validate incoming message
+        ValidationResult validation = Iso8583Parser.validateMessage(request);
+        if (!validation.isValid()) {
+            System.err.println("❌ Invalid message: " + String.join(", ", validation.getErrors()));
+            Iso8583Message errorResponse = new Iso8583Message();
+            errorResponse.setMti("0210");
+            errorResponse.addField(39, "30"); // Format error
+            return errorResponse;
+        }
+        
         Iso8583Message response = new Iso8583Message();
         String requestMti = request.getMti();
 

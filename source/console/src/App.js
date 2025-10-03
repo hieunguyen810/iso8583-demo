@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { faro } from '@grafana/faro-web-sdk';
 
 const API_URL = window.APP_CONFIG?.API_BASE_URL || 'http://localhost:8081/api/iso8583';
 
@@ -11,14 +12,21 @@ function App() {
   const [consoleOutput, setConsoleOutput] = useState([{ message: 'Console ready. Waiting for actions...', type: 'info', timestamp: new Date() }]);
 
   const sampleMessages = {
-    '0100': 'MTI=0100|F2=4000123456789012|F3=000000|F4=000000001000|F7=0101120000|F11=000001|F12=120000|F13=0101|F18=5999|F22=012|F25=00|F37=000000000001|F41=TERM001 |F42=MERCHANT001    |F49=840',
-    '0200': 'MTI=0200|F2=4000123456789012|F3=000000|F4=000000001000|F7=0101120000|F11=000001|F12=120000|F13=0101|F18=5999|F22=012|F25=00|F37=000000000001|F41=TERM001 |F42=MERCHANT001    |F49=840',
-    '0800': 'MTI=0800|F7=0101120000|F11=000001|F12=120000|F13=0101|F70=301',
-    '0900': 'MTI=0900|F7=0101120000|F11=000001|F12=120000|F13=0101|F70=301'
+    '0100': 'MTI=0100|2=4000123456789012|3=000000|4=000000001000|7=0101120000|11=000001|12=120000|13=0101|18=5999|22=012|25=00|37=000000000001|41=TERM001 |42=MERCHANT001    |49=840',
+    '0200': 'MTI=0200|2=4000123456789012|3=000000|4=000000001000|7=0101120000|11=000001|12=120000|13=0101|18=5999|22=012|25=00|37=000000000001|41=TERM001 |42=MERCHANT001    |49=840',
+    '0800': 'MTI=0800|7=0101120000|11=000001|12=120000|13=0101|70=301',
+    '0900': 'MTI=0900|7=0101120000|11=000001|12=120000|13=0101|70=301'
   };
 
   const logToConsole = (message, type = 'info') => {
     setConsoleOutput(prev => [...prev, { message, type, timestamp: new Date() }]);
+    
+    // Send to Faro
+    if (type === 'error') {
+      faro.api.pushError(new Error(message));
+    } else {
+      faro.api.pushLog([message], { level: type });
+    }
   };
 
   const clearConsole = () => {
@@ -44,6 +52,8 @@ function App() {
     }
 
     try {
+      faro.api.pushEvent('connection_add_attempt', { connectionId, host, port });
+      
       const response = await fetch(`${API_URL}/connections`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -53,13 +63,16 @@ function App() {
       const data = await response.json();
       
       if (data.success) {
+        faro.api.pushEvent('connection_added', { connectionId });
         logToConsole(`✅ Connection '${connectionId}' added successfully`, 'success');
         setConnectionForm({ connectionId: '', host: '', port: '' });
         refreshConnections();
       } else {
+        faro.api.pushEvent('connection_add_failed', { connectionId, error: data.message });
         logToConsole(`❌ Failed to add connection: ${data.message}`, 'error');
       }
     } catch (error) {
+      faro.api.pushEvent('connection_add_error', { connectionId, error: error.message });
       logToConsole(`❌ Error: ${error.message}`, 'error');
     }
   };
@@ -166,6 +179,9 @@ function App() {
     }
 
     try {
+      const mti = messageContent.includes('MTI=') ? messageContent.split('|')[0].split('=')[1] : 'unknown';
+      faro.api.pushEvent('message_send_attempt', { connectionId: selectedConnection, mti });
+      
       logToConsole(`📤 Sending message to ${selectedConnection}...`, 'info');
       const response = await fetch(`${API_URL}/connections/${selectedConnection}/send`, {
         method: 'POST',
@@ -176,13 +192,16 @@ function App() {
       const data = await response.json();
       
       if (data.success) {
+        faro.api.pushEvent('message_sent', { connectionId: selectedConnection, mti });
         logToConsole(`✅ Message sent successfully`, 'success');
         logToConsole(`📨 Request: ${data.request}`, 'request');
         logToConsole(`📬 Response: ${data.response}`, 'response');
       } else {
+        faro.api.pushEvent('message_send_failed', { connectionId: selectedConnection, mti, error: data.message });
         logToConsole(`❌ Send failed: ${data.message}`, 'error');
       }
     } catch (error) {
+      faro.api.pushEvent('message_send_error', { connectionId: selectedConnection, error: error.message });
       logToConsole(`❌ Error: ${error.message}`, 'error');
     }
   };

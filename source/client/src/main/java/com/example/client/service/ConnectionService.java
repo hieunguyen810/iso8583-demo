@@ -2,6 +2,8 @@ package com.example.client.service;
 
 import com.example.client.model.ConnectionInfo;
 import com.example.common.model.Iso8583Message;
+import com.example.common.model.ValidationResult;
+import com.example.common.parser.Iso8583Parser;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.*;
@@ -113,6 +115,14 @@ public class ConnectionService {
     }
 
     public String[] sendMessage(String connectionId, String message) throws Exception {
+        // Parse and validate message
+        Iso8583Message parsedMsg = Iso8583Parser.parseMessage(message);
+        ValidationResult validation = Iso8583Parser.validateMessage(parsedMsg);
+        
+        if (!validation.isValid()) {
+            throw new RuntimeException("Invalid message: " + String.join(", ", validation.getErrors()));
+        }
+        
         Channel channel = getActiveChannel(connectionId);
         String response = sendAndWaitForResponse(channel, message);
         return new String[]{message, response};

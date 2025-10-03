@@ -91,7 +91,6 @@ public class Iso8583Server {
 
             ChannelFuture f = b.bind(PORT).sync();
             System.out.println("✅ Server ready and listening...");
-            System.out.println("📋 Supported message types: 0200 (Auth), 0800 (Echo)");
             f.channel().closeFuture().sync();
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
