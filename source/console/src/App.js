@@ -21,11 +21,13 @@ function App() {
   const logToConsole = (message, type = 'info') => {
     setConsoleOutput(prev => [...prev, { message, type, timestamp: new Date() }]);
     
-    // Send to Faro
-    if (type === 'error') {
-      faro.api.pushError(new Error(message));
-    } else {
-      faro.api.pushLog([message], { level: type });
+    // Send to Faro if enabled
+    if (faro) {
+      if (type === 'error') {
+        faro.api.pushError(new Error(message));
+      } else {
+        faro.api.pushLog([message], { level: type });
+      }
     }
   };
 
@@ -52,7 +54,7 @@ function App() {
     }
 
     try {
-      faro.api.pushEvent('connection_add_attempt', { connectionId, host, port });
+      faro?.api.pushEvent('connection_add_attempt', { connectionId, host, port });
       
       const response = await fetch(`${API_URL}/connections`, {
         method: 'POST',
@@ -63,16 +65,16 @@ function App() {
       const data = await response.json();
       
       if (data.success) {
-        faro.api.pushEvent('connection_added', { connectionId });
+        faro?.api.pushEvent('connection_added', { connectionId });
         logToConsole(`✅ Connection '${connectionId}' added successfully`, 'success');
         setConnectionForm({ connectionId: '', host: '', port: '' });
         refreshConnections();
       } else {
-        faro.api.pushEvent('connection_add_failed', { connectionId, error: data.message });
+        faro?.api.pushEvent('connection_add_failed', { connectionId, error: data.message });
         logToConsole(`❌ Failed to add connection: ${data.message}`, 'error');
       }
     } catch (error) {
-      faro.api.pushEvent('connection_add_error', { connectionId, error: error.message });
+      faro?.api.pushEvent('connection_add_error', { connectionId, error: error.message });
       logToConsole(`❌ Error: ${error.message}`, 'error');
     }
   };
@@ -180,7 +182,7 @@ function App() {
 
     try {
       const mti = messageContent.includes('MTI=') ? messageContent.split('|')[0].split('=')[1] : 'unknown';
-      faro.api.pushEvent('message_send_attempt', { connectionId: selectedConnection, mti });
+      faro?.api.pushEvent('message_send_attempt', { connectionId: selectedConnection, mti });
       
       logToConsole(`📤 Sending message to ${selectedConnection}...`, 'info');
       const response = await fetch(`${API_URL}/connections/${selectedConnection}/send`, {
@@ -192,16 +194,16 @@ function App() {
       const data = await response.json();
       
       if (data.success) {
-        faro.api.pushEvent('message_sent', { connectionId: selectedConnection, mti });
+        faro?.api.pushEvent('message_sent', { connectionId: selectedConnection, mti });
         logToConsole(`✅ Message sent successfully`, 'success');
         logToConsole(`📨 Request: ${data.request}`, 'request');
         logToConsole(`📬 Response: ${data.response}`, 'response');
       } else {
-        faro.api.pushEvent('message_send_failed', { connectionId: selectedConnection, mti, error: data.message });
+        faro?.api.pushEvent('message_send_failed', { connectionId: selectedConnection, mti, error: data.message });
         logToConsole(`❌ Send failed: ${data.message}`, 'error');
       }
     } catch (error) {
-      faro.api.pushEvent('message_send_error', { connectionId: selectedConnection, error: error.message });
+      faro?.api.pushEvent('message_send_error', { connectionId: selectedConnection, error: error.message });
       logToConsole(`❌ Error: ${error.message}`, 'error');
     }
   };

@@ -216,7 +216,7 @@ class DemoApplicationTests {
                         String authMsg = "0200|2=400012345678901" + connectionId + "|3=000000|4=" +
                                        String.format("%012d", 1000 + j) + "|7=" +
                                        LocalDateTime.now().format(DateTimeFormatter.ofPattern("MMddHHmmss")) +
-                                       "|11=" + String.format("%06d", connectionId * 10 + j + 100);
+                                       "|11=" + String.format("%06d", connectionId * 10 + j + 100) + "|37=123456789012";
                         
                         output.writeShort(authMsg.length());
                         output.writeBytes(authMsg);
@@ -304,7 +304,7 @@ class DemoApplicationTests {
         // Send third message (auth)
         String message3 = "0200|2=4000111122223333|3=000000|4=000000005000|7=" +
                          LocalDateTime.now().format(DateTimeFormatter.ofPattern("MMddHHmmss")) +
-                         "|11=333333";
+                         "|11=333333|37=123456789012";
         String response3 = sendMessage(message3);
         assertTrue(response3.startsWith("0210"), "Auth should succeed");
         assertTrue(response3.contains("39=00"), "Transaction should be approved");

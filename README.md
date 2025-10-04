@@ -1,21 +1,9 @@
 # ISO 8583 Demo Project
-
-A comprehensive ISO 8583 message processing system built with Spring Boot, featuring multiple microservices for transaction simulation, processing, and authorization.
+This project simulate the ISO-8583 transaction flow. Contain common domain: issuing bank, accquiring bank and card network scheme. The main purpose of this project is create a sample payment transaction environment. Help me easier to build and practice DevOps.
 
 ## Architecture Overview
 
-```
-┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-│   Console   │───▶│   Client    │───▶│   Server    │
-│  (Web UI)   │    │ (REST API)  │    │  (Netty)    │
-└─────────────┘    └─────────────┘    └─────────────┘
-                           │                   │
-                           ▼                   ▼
-                   ┌─────────────┐    ┌─────────────┐
-                   │  Authorize  │    │  Simulator  │
-                   │  (Kafka)    │    │   (gRPC)    │
-                   └─────────────┘    └─────────────┘
-```
+![image](iso8583.drawio.png)
 
 ## Modules
 
@@ -64,10 +52,6 @@ A comprehensive ISO 8583 message processing system built with Spring Boot, featu
 
 ### 6. Console (Web UI)
 **Purpose**: Web-based management interface
-- **Files**:
-  - `index.html` - Main interface
-  - `styles.css` - Styling
-  - `script.js` - Client-side logic
 - **Features**:
   - Connection management
   - Real-time message monitoring
@@ -77,6 +61,7 @@ A comprehensive ISO 8583 message processing system built with Spring Boot, featu
 
 - Java 17+
 - Maven 3.6+
+- NodeJS 20+
 - Apache Kafka (optional, for authorization)
 - Docker (optional, for containerized deployment)
 
@@ -108,8 +93,11 @@ cd simulator
 mvn spring-boot:run
 ```
 
-### 3. Access Web Console
-Open `console/index.html` in your browser to manage connections and send messages.
+**Terminal 4 - Console:**
+```bash
+cd console
+npm start
+```
 
 ## Optional Services
 
