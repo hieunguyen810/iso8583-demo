@@ -63,7 +63,7 @@ public class TransactionSimulatorService {
         msg.addField(25, "00");
         msg.addField(37, String.format("%012d", random.nextInt(999999999)));
         msg.addField(41, "SIM001  ");
-        msg.addField(42, "SIMULATOR001    ");
+        msg.addField(42, "SIMULATOR000001");
         msg.addField(49, "840");
         
         return msg;

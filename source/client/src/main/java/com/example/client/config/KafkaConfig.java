@@ -20,7 +20,7 @@ import java.util.Map;
 @ConditionalOnProperty(name = "iso8583.client.authorization.enabled", havingValue = "true")
 public class KafkaConfig {
 
-    @Value("${spring.kafka.bootstrap-servers}")
+    @Value("${spring.kafka.bootstrap-servers:localhost:9092}")
     private String bootstrapServers;
 
     @Bean

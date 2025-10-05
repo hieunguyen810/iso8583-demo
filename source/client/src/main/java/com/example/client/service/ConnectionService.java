@@ -13,6 +13,10 @@ import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.handler.codec.LengthFieldBasedFrameDecoder;
 import io.netty.handler.codec.LengthFieldPrepender;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
@@ -114,6 +118,15 @@ public class ConnectionService {
         return new String[]{request, response};
     }
 
+    @Autowired(required = false)
+    private KafkaTemplate<String, String> kafkaTemplate;
+    
+    @Value("${iso8583.client.authorization.enabled:false}")
+    private boolean authorizationEnabled;
+    
+    @Value("${kafka.topic.iso8583.request:iso8583-requests}")
+    private String requestTopic;
+
     public String[] sendMessage(String connectionId, String message) throws Exception {
         // Parse and validate message
         Iso8583Message parsedMsg = Iso8583Parser.parseMessage(message);
@@ -123,9 +136,17 @@ public class ConnectionService {
             throw new RuntimeException("Invalid message: " + String.join(", ", validation.getErrors()));
         }
         
-        Channel channel = getActiveChannel(connectionId);
-        String response = sendAndWaitForResponse(channel, message);
-        return new String[]{message, response};
+        if (authorizationEnabled && kafkaTemplate != null) {
+            // Send to Kafka for authorization
+            System.out.println("📤 Sending to Kafka for authorization: " + message);
+            kafkaTemplate.send(requestTopic, connectionId, message);
+            return new String[]{message, "Sent to authorization service"};
+        } else {
+            // Direct send to server
+            Channel channel = getActiveChannel(connectionId);
+            String response = sendAndWaitForResponse(channel, message);
+            return new String[]{message, response};
+        }
     }
 
     private Channel getActiveChannel(String connectionId) throws Exception {
@@ -158,12 +179,22 @@ public class ConnectionService {
 
         @Override
         protected void channelRead0(ChannelHandlerContext ctx, ByteBuf msg) {
-            String response = msg.toString(StandardCharsets.UTF_8);
+            String message = msg.toString(StandardCharsets.UTF_8);
+            System.out.println("📨 Received from server: " + message);
             
+            // Check if this is a response to a pending request
             CompletableFuture<String> future = ctx.channel().attr(AttributeKey.<CompletableFuture<String>>valueOf("responseFuture")).get();
             if (future != null) {
-                future.complete(response);
+                // This is a response to our request
+                future.complete(message);
                 ctx.channel().attr(AttributeKey.valueOf("responseFuture")).set(null);
+            } else if (authorizationEnabled && kafkaTemplate != null) {
+                // This is an unsolicited message from server - send to Kafka for authorization
+                System.out.println("📤 Sending unsolicited message to Kafka: " + message);
+                kafkaTemplate.send(requestTopic, connectionId, message);
+            } else {
+                // No authorization - just log the message
+                System.out.println("📝 Unsolicited message (no authorization): " + message);
             }
         }
 
