@@ -16,6 +16,7 @@ spec:
       containers:
       - name: console
         image: iso8583-console:latest
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 80
         envFrom:

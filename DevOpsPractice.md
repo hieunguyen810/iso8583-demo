@@ -33,6 +33,9 @@ This project focus on the high availability in the Issuer Side (usually a Bank).
 - Each partition assigned to different consumer instance
 - Each message goes to only one consumer in the group
 
+**Kubernetes** K3s for testing purpose
+
+
 #### Downtime Scenerio
 
 #### Maintainance

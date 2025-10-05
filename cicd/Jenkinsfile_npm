@@ -1,0 +1,66 @@
+pipeline {
+    agent any
+    
+    environment {
+        DOCKER_REGISTRY = 'your-registry.com'
+        IMAGE_NAME = 'iso8583-console'
+        IMAGE_TAG = "${BUILD_NUMBER}"
+        KUBECONFIG = credentials('kubeconfig')
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                git branch: 'main',
+                    credentialsId: 'b09f464d-5eba-4367-8f6b-67244c638b03',
+                    url: 'https://github.com/hieunguyen810/iso8583-demo.git'
+            }
+        }
+
+        stage('Build') {
+            steps {
+                dir('source/console') {
+                    sh 'npm install'
+                    sh 'npm run build'
+                }
+            }
+        }
+        
+        stage('Docker Build') {
+            steps {
+                dir('source/console') {
+                    sh "docker build -t ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} ."
+                    sh "docker tag ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} ${DOCKER_REGISTRY}/${IMAGE_NAME}:latest"
+                }
+            }
+        }
+        
+        stage('Docker Push') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'docker-registry', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                    sh 'echo $DOCKER_PASS | docker login $DOCKER_REGISTRY -u $DOCKER_USER --password-stdin'
+                    sh "docker push ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+                    sh "docker push ${DOCKER_REGISTRY}/${IMAGE_NAME}:latest"
+                }
+            }
+        }
+        
+        stage('Deploy to Kubernetes') {
+            steps {
+                sh "sed -i 's|IMAGE_PLACEHOLDER|${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}|g' k8s/console-deployment.yaml"
+                sh 'kubectl apply -f k8s/console-deployment.yaml'
+                sh 'kubectl apply -f k8s/console-service.yaml'
+                sh "kubectl rollout status deployment/iso8583-console"
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'Pipeline completed successfully 🚀'
+        }
+        failure {
+            echo 'Pipeline failed 💥'
+        }
+    }
+}
