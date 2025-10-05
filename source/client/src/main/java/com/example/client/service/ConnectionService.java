@@ -137,9 +137,11 @@ public class ConnectionService {
         }
         
         if (authorizationEnabled && kafkaTemplate != null) {
-            // Send to Kafka for authorization
-            System.out.println("📤 Sending to Kafka for authorization: " + message);
-            kafkaTemplate.send(requestTopic, connectionId, message);
+            // Send to Kafka for authorization with field 37 as partition key for load balancing
+            String partitionKey = parsedMsg.getField(37);
+            if (partitionKey == null) partitionKey = connectionId;
+            System.out.println("📤 Sending to Kafka for authorization with key: " + partitionKey);
+            kafkaTemplate.send(requestTopic, partitionKey, message);
             return new String[]{message, "Sent to authorization service"};
         } else {
             // Direct send to server
@@ -190,8 +192,11 @@ public class ConnectionService {
                 ctx.channel().attr(AttributeKey.valueOf("responseFuture")).set(null);
             } else if (authorizationEnabled && kafkaTemplate != null) {
                 // This is an unsolicited message from server - send to Kafka for authorization
-                System.out.println("📤 Sending unsolicited message to Kafka: " + message);
-                kafkaTemplate.send(requestTopic, connectionId, message);
+                Iso8583Message parsedMsg = Iso8583Parser.parseMessage(message);
+                String partitionKey = parsedMsg.getField(37);
+                if (partitionKey == null) partitionKey = connectionId;
+                System.out.println("📤 Sending unsolicited message to Kafka with key: " + partitionKey);
+                kafkaTemplate.send(requestTopic, partitionKey, message);
             } else {
                 // No authorization - just log the message
                 System.out.println("📝 Unsolicited message (no authorization): " + message);
