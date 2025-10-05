@@ -3,11 +3,24 @@ package com.example.server.service;
 import com.example.common.model.Iso8583Message;
 import com.example.common.model.ValidationResult;
 import com.example.common.parser.Iso8583Parser;
+import com.example.server.metrics.TransactionMetrics;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 
+@Component
 public class Iso8583Processor {
-    public static Iso8583Message processMessage(Iso8583Message request) {
+    
+    private final TransactionMetrics transactionMetrics;
+    
+    public Iso8583Processor(TransactionMetrics transactionMetrics) {
+        this.transactionMetrics = transactionMetrics;
+    }
+    
+    public Iso8583Message processMessage(Iso8583Message request) {
+        System.out.println("🔄 Iso8583Processor.processMessage called with MTI: " + request.getMti());
+        
         // Validate incoming message
         ValidationResult validation = Iso8583Parser.validateMessage(request);
         if (!validation.isValid()) {
@@ -20,6 +33,7 @@ public class Iso8583Processor {
         
         Iso8583Message response = new Iso8583Message();
         String requestMti = request.getMti();
+        System.out.println("📊 TransactionMetrics instance: " + transactionMetrics);
 
         if ("0200".equals(requestMti)) {
             response.setMti("0210");
@@ -39,11 +53,15 @@ public class Iso8583Processor {
             copyField(request, response, 70);
             response.addField(7, LocalDateTime.now().format(DateTimeFormatter.ofPattern("MMddHHmmss")));
             System.out.println("💓 Processed echo request - Connection alive");
-        } else if ("0210".equals(requestMti))
+        } else if ("0210".equals(requestMti)) {
             System.out.println("Authorize Successfully");
+            // Don't return null, return the original message so timer can check it
+            return request;
+        }
         else {
             response.setMti("0210");
             response.addField(39, "30");
+            transactionMetrics.incrementFailed();
             System.err.println("⚠️ Unknown message type: " + requestMti);
         }
         return response;

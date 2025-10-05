@@ -3,6 +3,8 @@ package com.example.server.server;
 import com.example.common.model.Iso8583Message;
 import com.example.common.parser.Iso8583Parser;
 import com.example.server.service.Iso8583Processor;
+import com.example.server.service.TransactionTimer;
+import org.springframework.beans.factory.annotation.Autowired;
 
 
 import io.netty.bootstrap.ServerBootstrap;
@@ -29,11 +31,32 @@ public class Iso8583Server {
     private static final int PORT = 8583;
     private final AtomicBoolean running = new AtomicBoolean(false);
     private static final java.util.concurrent.ConcurrentHashMap<String, ChannelHandlerContext> connectedClients = new java.util.concurrent.ConcurrentHashMap<>();
+    private static Iso8583Processor processor;
+    private static TransactionTimer transactionTimer;
 
     private EventLoopGroup bossGroup;
     private EventLoopGroup workerGroup;
     
+    @Autowired
+    public void setProcessor(Iso8583Processor processor) {
+        Iso8583Server.processor = processor;
+    }
+    
+    @Autowired
+    public void setTransactionTimer(TransactionTimer timer) {
+        Iso8583Server.transactionTimer = timer;
+    }
+    
     public static void broadcastToClients(String message) {
+        // Parse message to get field 37 for tracking
+        Iso8583Message parsedMsg = Iso8583Parser.parseMessage(message);
+        String field37 = parsedMsg.getField(37);
+        
+        if ("0200".equals(parsedMsg.getMti()) && field37 != null && transactionTimer != null) {
+            transactionTimer.startTimer(field37);
+            System.out.println("⏱️ Started timer for request with field37: " + field37);
+        }
+        
         connectedClients.values().forEach(ctx -> {
             if (ctx.channel().isActive()) {
                 String clientAddress = ctx.channel().remoteAddress().toString();
@@ -134,8 +157,20 @@ public class Iso8583Server {
             System.out.println("📨 [" + clientAddress + "] Received: " + msg);
             try {
                 Iso8583Message request = Iso8583Parser.parseMessage(msg);
-                Iso8583Message response = Iso8583Processor.processMessage(request);
+                Iso8583Message response = processor.processMessage(request);
                 String responseMessage = response.toString();
+                
+                // Check if this is a 0210 response with matching field 37
+                if ("0210".equals(request.getMti()) && transactionTimer != null) {
+                    String responseField37 = request.getField(37);
+                    if (responseField37 != null) {
+                        transactionTimer.checkResponse(responseField37);
+                    }
+                    // Don't send response for 0210 messages - transaction is complete
+                    System.out.println("✅ Transaction completed for field37: " + responseField37);
+                    return;
+                }
+                
                 // writeAndFlush will go through StringEncoder and LengthFieldPrepender
                 ctx.writeAndFlush(responseMessage).addListener(f -> {
                     if (f.isSuccess()) {
