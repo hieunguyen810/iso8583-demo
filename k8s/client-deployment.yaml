@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: client
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: client
+  template:
+    metadata:
+      labels:
+        app: client
+    spec:
+      containers:
+      - name: client
+        image: iso8583-client:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8081
+          name: http
+        env:
+        - name: AUTHORIZATION_ENABLED
+          value: "false"
+        - name: ISO8583_SERVER_HOST
+          value: "server-service"
+        - name: ISO8583_SERVER_PORT
+          value: "8583"
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: "kafka:9092"
+        volumeMounts:
+        - name: config-volume
+          mountPath: /app/config
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8081
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8081
+          initialDelaySeconds: 15
+          periodSeconds: 5
+      volumes:
+      - name: config-volume
+        configMap:
+          name: client-config

@@ -3,6 +3,7 @@ package com.example.simulator.service;
 import com.example.common.model.Iso8583Message;
 import com.example.simulator.grpc.Iso8583Proto;
 import com.example.simulator.grpc.Iso8583ServiceGrpc;
+import io.grpc.StatusRuntimeException;
 import net.devh.boot.grpc.client.inject.GrpcClient;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -11,6 +12,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.TimeUnit;
 
 @Service
 public class TransactionSimulatorService {
@@ -23,28 +25,55 @@ public class TransactionSimulatorService {
 
     @Scheduled(fixedRate = 15000) // Every 15 seconds
     public void sendRandomTransaction() {
-        try {
-            Iso8583Message transaction = createRandomTransaction();
-            String message = transaction.toString();
-            
-            System.out.println("📤 Sending transaction: " + message);
-            
-            Iso8583Proto.TransactionRequest request = Iso8583Proto.TransactionRequest.newBuilder()
-                    .setMessage(message)
-                    .setClientId("simulator-" + System.currentTimeMillis())
-                    .build();
-            
-            Iso8583Proto.TransactionResponse response = iso8583ServiceStub.sendTransaction(request);
-            
-            if (response.getSuccess()) {
-                System.out.println("✅ Transaction sent successfully");
-            } else {
-                System.err.println("❌ Transaction failed: " + response.getMessage());
+        int maxRetries = 3;
+        int retryDelay = 2000; // 2 seconds
+        
+        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                Iso8583Message transaction = createRandomTransaction();
+                String message = transaction.toString();
+                
+                System.out.println("📤 Sending transaction (attempt " + attempt + "): " + message);
+                
+                Iso8583Proto.TransactionRequest request = Iso8583Proto.TransactionRequest.newBuilder()
+                        .setMessage(message)
+                        .setClientId("simulator-" + System.currentTimeMillis())
+                        .build();
+                
+                Iso8583Proto.TransactionResponse response = iso8583ServiceStub
+                        .withDeadlineAfter(5, TimeUnit.SECONDS)
+                        .sendTransaction(request);
+                
+                if (response.getSuccess()) {
+                    System.out.println("✅ Transaction sent successfully");
+                } else {
+                    System.err.println("❌ Transaction failed: " + response.getMessage());
+                }
+                return; // Success, exit retry loop
+                
+            } catch (StatusRuntimeException e) {
+                System.err.println("❌ gRPC error (attempt " + attempt + "): " + e.getStatus());
+                if (attempt < maxRetries) {
+                    try {
+                        Thread.sleep(retryDelay);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                }
+            } catch (Exception e) {
+                System.err.println("❌ Error sending transaction (attempt " + attempt + "): " + e.getMessage());
+                if (attempt < maxRetries) {
+                    try {
+                        Thread.sleep(retryDelay);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                }
             }
-            
-        } catch (Exception e) {
-            System.err.println("❌ Error sending transaction: " + e.getMessage());
         }
+        System.err.println("❌ Failed to send transaction after " + maxRetries + " attempts");
     }
 
     private Iso8583Message createRandomTransaction() {

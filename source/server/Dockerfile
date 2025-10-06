@@ -6,8 +6,8 @@ USER spring:spring
 
 WORKDIR /app
 
-COPY /target/authorize*.jar app.jar
+COPY /target/client*.jar app.jar
 
-EXPOSE 8082
+EXPOSE 8080
 
 ENTRYPOINT ["java","-jar","app.jar"]

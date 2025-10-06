@@ -3,9 +3,9 @@
 - Monitor Client: count success/failed transaction
 - Test cases: client, simulator, authorize
 - Client -> Server: File configuration (auto re-connect)
-- Simulator -> Server: auto-reconnect
 - Simulator: support multiple request type
-
+- Profiling
+- Tracing
 
 #### K8s
 - Helm chart
