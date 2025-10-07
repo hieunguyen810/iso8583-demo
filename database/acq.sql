@@ -1,11 +1,8 @@
 CREATE DATABASE acquirer_db;
-CREATE DATABASE issuer_db;
 
 CREATE ROLE acquirer_user LOGIN PASSWORD 'acq123';
-CREATE ROLE issuer_user LOGIN PASSWORD 'iss123';
 
 ALTER DATABASE acquirer_db OWNER TO acquirer_user;
-ALTER DATABASE issuer_db OWNER TO issuer_user;
 
 -- Connect to acquirer_db and create tables
 \c acquirer_db;

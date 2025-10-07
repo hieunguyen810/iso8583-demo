@@ -12,17 +12,21 @@ import com.example.server.repository.TransactionRepository;
 import com.example.server.repository.TransactionEventRepository;
 import io.grpc.stub.StreamObserver;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 
 @Service
 public class Iso8583ServiceImpl extends Iso8583ServiceGrpc.Iso8583ServiceImplBase {
     
-    @Autowired
+    @Autowired(required = false)
     private TransactionRepository transactionRepository;
     
-    @Autowired
+    @Autowired(required = false)
     private TransactionEventRepository eventRepository;
+    
+    @Value("${iso8583.database.write.enabled:true}")
+    private boolean databaseWriteEnabled;
     
     public Iso8583ServiceImpl() {
         System.out.println("✅ Iso8583ServiceImpl created");
@@ -45,15 +49,21 @@ public class Iso8583ServiceImpl extends Iso8583ServiceGrpc.Iso8583ServiceImplBas
                 throw new RuntimeException("Invalid message: " + String.join(", ", validation.getErrors()));
             }
             
-            // Save transaction to database
-            Transaction transaction = saveTransaction(parsedMsg);
-            saveTransactionEvent(transaction.getId(), "RECEIVED", message);
+            // Save transaction to database if enabled
+            Long transactionId = null;
+            if (databaseWriteEnabled && transactionRepository != null && eventRepository != null) {
+                Transaction transaction = saveTransaction(parsedMsg);
+                transactionId = transaction.getId();
+                saveTransactionEvent(transactionId, "RECEIVED", message);
+            }
             
             // Send message to all connected socket clients
             Iso8583Server.broadcastToClients(message);
             
-            // Log broadcast event
-            saveTransactionEvent(transaction.getId(), "BROADCAST", message);
+            // Log broadcast event if database enabled
+            if (databaseWriteEnabled && transactionId != null && eventRepository != null) {
+                saveTransactionEvent(transactionId, "BROADCAST", message);
+            }
             
             Iso8583Proto.TransactionResponse response = Iso8583Proto.TransactionResponse.newBuilder()
                     .setSuccess(true)
