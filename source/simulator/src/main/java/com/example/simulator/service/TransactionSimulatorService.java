@@ -1,18 +1,24 @@
 package com.example.simulator.service;
 
 import com.example.common.model.Iso8583Message;
+import com.example.simulator.config.SimulatorConfig;
 import com.example.simulator.grpc.Iso8583Proto;
 import com.example.simulator.grpc.Iso8583ServiceGrpc;
 import io.grpc.StatusRuntimeException;
 import net.devh.boot.grpc.client.inject.GrpcClient;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Random;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 @Service
 public class TransactionSimulatorService {
@@ -20,20 +26,105 @@ public class TransactionSimulatorService {
     @GrpcClient("iso8583-server")
     private Iso8583ServiceGrpc.Iso8583ServiceBlockingStub iso8583ServiceStub;
 
+    @Autowired
+    private SimulatorConfig config;
+
     private final Random random = new Random();
     private final AtomicInteger stanCounter = new AtomicInteger(1);
+    private final AtomicLong totalTransactions = new AtomicLong(0);
+    private final AtomicLong successfulTransactions = new AtomicLong(0);
+    private final AtomicLong failedTransactions = new AtomicLong(0);
+    private final ExecutorService executorService = Executors.newCachedThreadPool();
+    private volatile boolean spikeActive = false;
+    private ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(10);
 
-    @Scheduled(fixedRate = 15000) // Every 15 seconds
-    public void sendRandomTransaction() {
-        int maxRetries = 3;
-        int retryDelay = 2000; // 2 seconds
+    @EventListener(ApplicationReadyEvent.class)
+    public void startSimulation() {
+        if (!config.isEnabled()) {
+            System.out.println("🚫 Simulator disabled");
+            return;
+        }
         
-        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+        System.out.println("🚀 Starting simulator in " + config.getMode() + " mode");
+        
+        switch (config.getMode()) {
+            case LOAD_TEST -> startLoadTest();
+            case SPIKE -> startSpikeTest();
+            case MANUAL -> System.out.println("📋 Manual mode - use REST endpoints to trigger transactions");
+            default -> System.out.println("⏰ Scheduled mode active");
+        }
+    }
+    
+    @Scheduled(fixedRateString = "#{simulatorConfig.scheduled.intervalMs}")
+    public void scheduledTransaction() {
+        if (!config.isEnabled() || config.getMode() != SimulatorConfig.Mode.SCHEDULED) {
+            return;
+        }
+        sendTransaction();
+    }
+    
+    @Async
+    public void startLoadTest() {
+        var loadConfig = config.getLoadTest();
+        System.out.println("🔥 Starting load test: " + loadConfig.getThreadsPerSecond() + " TPS for " + loadConfig.getDurationSeconds() + "s");
+        
+        long startTime = System.currentTimeMillis();
+        long endTime = startTime + (loadConfig.getDurationSeconds() * 1000L);
+        
+        scheduler.scheduleAtFixedRate(() -> {
+            if (System.currentTimeMillis() > endTime) {
+                scheduler.shutdown();
+                printStats();
+                return;
+            }
+            
+            for (int i = 0; i < loadConfig.getThreadsPerSecond(); i++) {
+                executorService.submit(this::sendTransaction);
+            }
+        }, 0, 1, TimeUnit.SECONDS);
+    }
+    
+    @Async
+    public void startSpikeTest() {
+        var spikeConfig = config.getSpike();
+        System.out.println("⚡ Starting spike test: Normal " + spikeConfig.getNormalTps() + " TPS, Spike " + spikeConfig.getSpikeTps() + " TPS");
+        
+        // Normal load
+        scheduler.scheduleAtFixedRate(() -> {
+            if (!spikeActive) {
+                for (int i = 0; i < spikeConfig.getNormalTps(); i++) {
+                    executorService.submit(this::sendTransaction);
+                }
+            }
+        }, 0, 1, TimeUnit.SECONDS);
+        
+        // Spike scheduler
+        scheduler.scheduleAtFixedRate(() -> {
+            System.out.println("🌋 Starting spike for " + spikeConfig.getSpikeDurationSeconds() + " seconds");
+            spikeActive = true;
+            
+            ScheduledFuture<?> spikeTask = scheduler.scheduleAtFixedRate(() -> {
+                for (int i = 0; i < spikeConfig.getSpikeTps(); i++) {
+                    executorService.submit(this::sendTransaction);
+                }
+            }, 0, 1, TimeUnit.SECONDS);
+            
+            scheduler.schedule(() -> {
+                spikeTask.cancel(false);
+                spikeActive = false;
+                System.out.println("🌋 Spike ended");
+            }, spikeConfig.getSpikeDurationSeconds(), TimeUnit.SECONDS);
+            
+        }, spikeConfig.getIntervalBetweenSpikesSeconds(), spikeConfig.getIntervalBetweenSpikesSeconds(), TimeUnit.SECONDS);
+    }
+    
+    public void sendTransaction() {
+        totalTransactions.incrementAndGet();
+        
+        for (int attempt = 1; attempt <= config.getScheduled().getMaxRetries(); attempt++) {
             try {
                 Iso8583Message transaction = createRandomTransaction();
                 String message = transaction.toString();
-                
-                System.out.println("📤 Sending transaction (attempt " + attempt + "): " + message);
                 
                 Iso8583Proto.TransactionRequest request = Iso8583Proto.TransactionRequest.newBuilder()
                         .setMessage(message)
@@ -45,27 +136,21 @@ public class TransactionSimulatorService {
                         .sendTransaction(request);
                 
                 if (response.getSuccess()) {
-                    System.out.println("✅ Transaction sent successfully");
+                    successfulTransactions.incrementAndGet();
+                    if (config.getMode() == SimulatorConfig.Mode.SCHEDULED) {
+                        System.out.println("✅ Transaction sent successfully");
+                    }
                 } else {
+                    failedTransactions.incrementAndGet();
                     System.err.println("❌ Transaction failed: " + response.getMessage());
                 }
-                return; // Success, exit retry loop
+                return;
                 
-            } catch (StatusRuntimeException e) {
-                System.err.println("❌ gRPC error (attempt " + attempt + "): " + e.getStatus());
-                if (attempt < maxRetries) {
-                    try {
-                        Thread.sleep(retryDelay);
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        return;
-                    }
-                }
             } catch (Exception e) {
-                System.err.println("❌ Error sending transaction (attempt " + attempt + "): " + e.getMessage());
-                if (attempt < maxRetries) {
+                failedTransactions.incrementAndGet();
+                if (attempt < config.getScheduled().getMaxRetries()) {
                     try {
-                        Thread.sleep(retryDelay);
+                        Thread.sleep(config.getScheduled().getRetryDelayMs());
                     } catch (InterruptedException ie) {
                         Thread.currentThread().interrupt();
                         return;
@@ -73,7 +158,19 @@ public class TransactionSimulatorService {
                 }
             }
         }
-        System.err.println("❌ Failed to send transaction after " + maxRetries + " attempts");
+    }
+    
+    @Scheduled(fixedRate = 30000)
+    public void printStats() {
+        if (config.getMode() != SimulatorConfig.Mode.SCHEDULED) {
+            long total = totalTransactions.get();
+            long success = successfulTransactions.get();
+            long failed = failedTransactions.get();
+            double successRate = total > 0 ? (success * 100.0 / total) : 0;
+            
+            System.out.println(String.format("📊 Stats - Total: %d, Success: %d (%.1f%%), Failed: %d", 
+                total, success, successRate, failed));
+        }
     }
 
     private Iso8583Message createRandomTransaction() {
