@@ -35,8 +35,29 @@ This project focus on the high availability in the Issuer Side (usually a Bank).
 
 **Kubernetes** K3s for testing purpose
 
+**High Availability ISO 8583 connection**
+#### Prerequisites
+- Client and Server must maintain the persistent, bi-directional connection.
+- Server and Client should running in multiple instances to increase high availability and able to upgrade without any downtime.
+#### Solutions
+- On Client Side:
+    - Deploy on kubernetes: multi primary cluster setup with Istio.
+    - Kafka Cluster
+    - When Client receive messages, produce to Kafka. 
+    - Authorize consume Kafka topics.
+    - Client should connect with multiple server node (in different regions).
+    - Client need to send echo message every minutes (or less) to server. If server did not receive message --> disconnect to this instance (send to another available client instance)
+    - Authorize module: stateless
+    - Client module: stateful
+    - Console module can connect and control multiple client.
+- On Server side:
+    - Deploy on kubernetes: multi primary cluster setup with Istio.
+    - Kafka Cluster
+    - When server receive a connect message from client -> produce Kafka, set current status is available. Simulator consume this topic, send message to available server only.
+    - When server receive a disconnect message from client or did not receive echo message after 1 minute -> produce Kafka, set current status is unavailable. Simulator consume this topic, stop send message to this server instance.
 
-#### Downtime Scenerio
+#### Downtime Scenerio and Resolved
+
 
 #### Maintainance
 
