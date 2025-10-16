@@ -1,0 +1,64 @@
+// OTLP receiver for traces and metrics
+otelcol.receiver.otlp "default" {
+  grpc {
+    endpoint = "0.0.0.0:4317"
+  }
+  http {
+    endpoint = "0.0.0.0:4318"
+  }
+
+  output {
+    metrics = [otelcol.processor.batch.default.input]
+    traces  = [otelcol.processor.batch.default.input]
+  }
+}
+
+// Batch processor
+otelcol.processor.batch "default" {
+  output {
+    metrics = [otelcol.exporter.prometheus.default.input]
+    traces  = [otelcol.exporter.otlp.tempo_traces.input]
+  }
+}
+
+// Prometheus exporter for metrics
+otelcol.exporter.prometheus "default" {
+  forward_to = [prometheus.remote_write.default.receiver]
+}
+
+// OTLP exporter for traces to Tempo
+otelcol.exporter.otlp "tempo_traces" {
+  client {
+    endpoint = "http://tempo:4317"
+    tls {
+      insecure = true
+    }
+  }
+}
+
+// Prometheus remote write to local Prometheus
+prometheus.remote_write "default" {
+  endpoint {
+    url = "http://prometheus:9090/api/v1/write"
+  }
+}
+
+// Prometheus metrics server for scraping
+prometheus.exporter.self "alloy_metrics" {
+}
+
+prometheus.scrape "alloy_metrics" {
+  targets = prometheus.exporter.self.alloy_metrics.targets
+  forward_to = [prometheus.remote_write.default.receiver]
+  scrape_interval = "15s"
+}
+
+// HTTP server for Prometheus metrics endpoint
+prometheus.exporter.unix "system" {
+}
+
+prometheus.scrape "system" {
+  targets = prometheus.exporter.unix.system.targets
+  forward_to = [prometheus.remote_write.default.receiver]
+  scrape_interval = "15s"
+}

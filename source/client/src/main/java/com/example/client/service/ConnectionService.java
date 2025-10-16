@@ -13,11 +13,19 @@ import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.handler.codec.LengthFieldBasedFrameDecoder;
 import io.netty.handler.codec.LengthFieldPrepender;
+import io.opentelemetry.api.trace.Tracer;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.StatusCode;
+import io.opentelemetry.api.metrics.Meter;
+import io.opentelemetry.api.metrics.LongCounter;
+import io.opentelemetry.context.Scope;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
+
+import jakarta.annotation.PostConstruct;
 
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
@@ -35,6 +43,25 @@ public class ConnectionService {
     private final Map<String, Channel> activeChannels = new ConcurrentHashMap<>();
     private final Map<String, EventLoopGroup> eventLoopGroups = new ConcurrentHashMap<>();
     private final AtomicInteger stanCounter = new AtomicInteger(1);
+    
+    @Autowired
+    private Tracer tracer;
+    
+    @Autowired
+    private Meter meter;
+    
+    private LongCounter connectionCounter;
+    private LongCounter messageCounter;
+    
+    @PostConstruct
+    public void init() {
+        connectionCounter = meter.counterBuilder("iso8583_connections_total")
+                .setDescription("Total number of ISO 8583 connections")
+                .build();
+        messageCounter = meter.counterBuilder("iso8583_messages_total")
+                .setDescription("Total number of ISO 8583 messages sent")
+                .build();
+    }
 
     public List<ConnectionInfo> getAllConnections() {
         return new ArrayList<>(connections.values());
@@ -45,36 +72,59 @@ public class ConnectionService {
     }
 
     public void connect(String connectionId) throws Exception {
-        ConnectionInfo conn = connections.get(connectionId);
-        if (conn == null) {
-            throw new RuntimeException("Connection not found: " + connectionId);
+        Span span = tracer.spanBuilder("iso8583.connection.connect")
+                .setAttribute("connection.id", connectionId)
+                .startSpan();
+        
+        try (Scope scope = span.makeCurrent()) {
+            ConnectionInfo conn = connections.get(connectionId);
+            if (conn == null) {
+                span.setStatus(StatusCode.ERROR, "Connection not found");
+                throw new RuntimeException("Connection not found: " + connectionId);
+            }
+
+            if (conn.isConnected()) {
+                span.setStatus(StatusCode.ERROR, "Already connected");
+                throw new RuntimeException("Already connected: " + connectionId);
+            }
+            
+            span.setAttribute("connection.host", conn.getHost())
+                .setAttribute("connection.port", conn.getPort());
+
+            EventLoopGroup group = new NioEventLoopGroup();
+            eventLoopGroups.put(connectionId, group);
+
+            Bootstrap bootstrap = new Bootstrap();
+            bootstrap.group(group)
+                    .channel(NioSocketChannel.class)
+                    .option(ChannelOption.SO_KEEPALIVE, true)
+                    .handler(new ChannelInitializer<SocketChannel>() {
+                        @Override
+                        protected void initChannel(SocketChannel ch) {
+                            ChannelPipeline pipeline = ch.pipeline();
+                            pipeline.addLast(new LengthFieldBasedFrameDecoder(65535, 0, 2, 0, 2));
+                            pipeline.addLast(new LengthFieldPrepender(2));
+                            pipeline.addLast(new ClientHandler(connectionId));
+                        }
+                    });
+
+            ChannelFuture future = bootstrap.connect(conn.getHost(), conn.getPort()).sync();
+            Channel channel = future.channel();
+            activeChannels.put(connectionId, channel);
+            conn.setConnected(true);
+            
+            connectionCounter.add(1, io.opentelemetry.api.common.Attributes.of(
+                io.opentelemetry.api.common.AttributeKey.stringKey("connection.id"), connectionId,
+                io.opentelemetry.api.common.AttributeKey.stringKey("operation"), "connect"
+            ));
+            
+            span.setStatus(StatusCode.OK);
+        } catch (Exception e) {
+            span.setStatus(StatusCode.ERROR, e.getMessage());
+            throw e;
+        } finally {
+            span.end();
         }
-
-        if (conn.isConnected()) {
-            throw new RuntimeException("Already connected: " + connectionId);
-        }
-
-        EventLoopGroup group = new NioEventLoopGroup();
-        eventLoopGroups.put(connectionId, group);
-
-        Bootstrap bootstrap = new Bootstrap();
-        bootstrap.group(group)
-                .channel(NioSocketChannel.class)
-                .option(ChannelOption.SO_KEEPALIVE, true)
-                .handler(new ChannelInitializer<SocketChannel>() {
-                    @Override
-                    protected void initChannel(SocketChannel ch) {
-                        ChannelPipeline pipeline = ch.pipeline();
-                        pipeline.addLast(new LengthFieldBasedFrameDecoder(65535, 0, 2, 0, 2));
-                        pipeline.addLast(new LengthFieldPrepender(2));
-                        pipeline.addLast(new ClientHandler(connectionId));
-                    }
-                });
-
-        ChannelFuture future = bootstrap.connect(conn.getHost(), conn.getPort()).sync();
-        Channel channel = future.channel();
-        activeChannels.put(connectionId, channel);
-        conn.setConnected(true);
     }
 
     public void disconnect(String connectionId) throws Exception {
@@ -104,18 +154,39 @@ public class ConnectionService {
     }
 
     public String[] sendEcho(String connectionId) throws Exception {
-        Channel channel = getActiveChannel(connectionId);
+        Span span = tracer.spanBuilder("iso8583.message.echo")
+                .setAttribute("connection.id", connectionId)
+                .setAttribute("message.type", "0800")
+                .startSpan();
         
-        Iso8583Message echoMsg = new Iso8583Message();
-        echoMsg.setMti("0800");
-        echoMsg.addField(7, LocalDateTime.now().format(DateTimeFormatter.ofPattern("MMddHHmmss")));
-        echoMsg.addField(11, String.format("%06d", stanCounter.getAndIncrement()));
-        echoMsg.addField(70, "001");
-        
-        String request = echoMsg.toString();
-        String response = sendAndWaitForResponse(channel, request);
-        
-        return new String[]{request, response};
+        try (Scope scope = span.makeCurrent()) {
+            Channel channel = getActiveChannel(connectionId);
+            
+            Iso8583Message echoMsg = new Iso8583Message();
+            echoMsg.setMti("0800");
+            echoMsg.addField(7, LocalDateTime.now().format(DateTimeFormatter.ofPattern("MMddHHmmss")));
+            String stan = String.format("%06d", stanCounter.getAndIncrement());
+            echoMsg.addField(11, stan);
+            echoMsg.addField(70, "001");
+            
+            span.setAttribute("message.stan", stan);
+            
+            String request = echoMsg.toString();
+            String response = sendAndWaitForResponse(channel, request);
+            
+            messageCounter.add(1, io.opentelemetry.api.common.Attributes.of(
+                io.opentelemetry.api.common.AttributeKey.stringKey("connection.id"), connectionId,
+                io.opentelemetry.api.common.AttributeKey.stringKey("message.type"), "echo"
+            ));
+            
+            span.setStatus(StatusCode.OK);
+            return new String[]{request, response};
+        } catch (Exception e) {
+            span.setStatus(StatusCode.ERROR, e.getMessage());
+            throw e;
+        } finally {
+            span.end();
+        }
     }
 
     @Autowired(required = false)
@@ -128,26 +199,57 @@ public class ConnectionService {
     private String requestTopic;
 
     public String[] sendMessage(String connectionId, String message) throws Exception {
-        // Parse and validate message
-        Iso8583Message parsedMsg = Iso8583Parser.parseMessage(message);
-        ValidationResult validation = Iso8583Parser.validateMessage(parsedMsg);
+        Span span = tracer.spanBuilder("iso8583.message.send")
+                .setAttribute("connection.id", connectionId)
+                .startSpan();
         
-        if (!validation.isValid()) {
-            throw new RuntimeException("Invalid message: " + String.join(", ", validation.getErrors()));
-        }
-        
-        if (authorizationEnabled && kafkaTemplate != null) {
-            // Send to Kafka for authorization with field 37 as partition key for load balancing
-            String partitionKey = parsedMsg.getField(37);
-            if (partitionKey == null) partitionKey = connectionId;
-            System.out.println("📤 Sending to Kafka for authorization with key: " + partitionKey);
-            kafkaTemplate.send(requestTopic, partitionKey, message);
-            return new String[]{message, "Sent to authorization service"};
-        } else {
-            // Direct send to server
-            Channel channel = getActiveChannel(connectionId);
-            String response = sendAndWaitForResponse(channel, message);
-            return new String[]{message, response};
+        try (Scope scope = span.makeCurrent()) {
+            // Parse and validate message
+            Iso8583Message parsedMsg = Iso8583Parser.parseMessage(message);
+            ValidationResult validation = Iso8583Parser.validateMessage(parsedMsg);
+            
+            span.setAttribute("message.mti", parsedMsg.getMti())
+                .setAttribute("message.stan", parsedMsg.getField(11) != null ? parsedMsg.getField(11) : "unknown");
+            
+            if (!validation.isValid()) {
+                span.setStatus(StatusCode.ERROR, "Invalid message");
+                throw new RuntimeException("Invalid message: " + String.join(", ", validation.getErrors()));
+            }
+            
+            if (authorizationEnabled && kafkaTemplate != null) {
+                // Send to Kafka for authorization with field 37 as partition key for load balancing
+                String partitionKey = parsedMsg.getField(37);
+                if (partitionKey == null) partitionKey = connectionId;
+                span.setAttribute("kafka.partition.key", partitionKey)
+                    .setAttribute("kafka.topic", requestTopic);
+                System.out.println("📤 Sending to Kafka for authorization with key: " + partitionKey);
+                kafkaTemplate.send(requestTopic, partitionKey, message);
+                
+                messageCounter.add(1, io.opentelemetry.api.common.Attributes.of(
+                    io.opentelemetry.api.common.AttributeKey.stringKey("connection.id"), connectionId,
+                    io.opentelemetry.api.common.AttributeKey.stringKey("message.type"), "kafka"
+                ));
+                
+                span.setStatus(StatusCode.OK);
+                return new String[]{message, "Sent to authorization service"};
+            } else {
+                // Direct send to server
+                Channel channel = getActiveChannel(connectionId);
+                String response = sendAndWaitForResponse(channel, message);
+                
+                messageCounter.add(1, io.opentelemetry.api.common.Attributes.of(
+                    io.opentelemetry.api.common.AttributeKey.stringKey("connection.id"), connectionId,
+                    io.opentelemetry.api.common.AttributeKey.stringKey("message.type"), "direct"
+                ));
+                
+                span.setStatus(StatusCode.OK);
+                return new String[]{message, response};
+            }
+        } catch (Exception e) {
+            span.setStatus(StatusCode.ERROR, e.getMessage());
+            throw e;
+        } finally {
+            span.end();
         }
     }
 

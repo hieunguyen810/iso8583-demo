@@ -3,6 +3,10 @@ package com.example.client.controller;
 import com.example.client.model.ApiResponse;
 import com.example.client.model.ConnectionInfo;
 import com.example.client.service.ConnectionService;
+import io.opentelemetry.api.trace.Tracer;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.StatusCode;
+import io.opentelemetry.context.Scope;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
@@ -16,6 +20,9 @@ public class Iso8583Controller {
 
     @Autowired
     private ConnectionService connectionService;
+    
+    @Autowired
+    private Tracer tracer;
 
     @GetMapping("/connections")
     public List<ConnectionInfo> getConnections() {
@@ -74,12 +81,23 @@ public class Iso8583Controller {
 
     @PostMapping("/connections/{connectionId}/send")
     public ApiResponse sendMessage(@PathVariable String connectionId, @RequestBody Map<String, String> payload) {
-        try {
+        Span span = tracer.spanBuilder("http.request.send_message")
+                .setAttribute("http.method", "POST")
+                .setAttribute("connection.id", connectionId)
+                .startSpan();
+        
+        try (Scope scope = span.makeCurrent()) {
             String message = payload.get("message");
+            span.setAttribute("message.content", message != null ? message.substring(0, Math.min(message.length(), 100)) : "null");
+            
             String[] result = connectionService.sendMessage(connectionId, message);
+            span.setStatus(StatusCode.OK);
             return new ApiResponse(true, "Message sent successfully", result[0], result[1]);
         } catch (Exception e) {
+            span.setStatus(StatusCode.ERROR, e.getMessage());
             return new ApiResponse(false, e.getMessage());
+        } finally {
+            span.end();
         }
     }
 }
